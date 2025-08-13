@@ -1,0 +1,850 @@
+# 📊 Profit & Loss Menu System (Jupyter Widget)
+# ============================================
+# Bu kod hüceyrəsini Jupyter Notebook-da icra etdiyiniz zaman
+# interaktiv bir Profit & Loss idarəetmə paneli yaradılır.  Panel
+# vasitəsilə əməliyyatlar (Revenue, COGS, Other Income, Expense)
+# əlavə edə, ACCA formatında cədvəli görə, qrafiklərə baxa,
+# Excel faylı kimi ixrac edə və məlumatları sıfırlaya bilərsiniz.
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+from ipywidgets import widgets, VBox, HBox, Button, HTML, Dropdown, Text, FloatText, Output
+from IPython.display import display, clear_output
+
+print("🔄 Profit & Loss sistemi yüklənir...")
+
+# Başlanğıc məlumatlar
+pl_data = [
+    {"Line": "Sales (Satışlar)", "Amount": 200_000, "Type": "Revenue"},
+    {"Line": "Opening inventories (İlkin ehtiyatlar)", "Amount": 40_000, "Type": "COGS"},
+    {"Line": "Purchases (Alışlar)", "Amount": 110_000, "Type": "COGS"},
+    {"Line": "Carriage inwards (Gətirmə xərci)", "Amount": 20_000, "Type": "COGS"},
+    {"Line": "Closing inventories (Son ehtiyatlar)", "Amount": 50_000, "Type": "COGS"},
+    {"Line": "Sundry income (Digər gəlirlər)", "Amount": 5_000, "Type": "Other Income"},
+    {"Line": "Discounts receivable (Alınacaq endirimlər)", "Amount": 3_000, "Type": "Other Income"},
+    {"Line": "Rent (İcarə)", "Amount": 11_000, "Type": "Expense"},
+    {"Line": "Carriage outwards (Çatdırma xərci)", "Amount": 4_000, "Type": "Expense"},
+    {"Line": "Telephone (Telefon)", "Amount": 1_000, "Type": "Expense"},
+    {"Line": "Electricity (Elektrik)", "Amount": 2_000, "Type": "Expense"},
+    {"Line": "Wages and salaries (Əməkhaqqı və maaşlar)", "Amount": 9_000, "Type": "Expense"},
+    {"Line": "Depreciation (Amortizasiya)", "Amount": 7_000, "Type": "Expense"},
+    {"Line": "Irrecoverable debts (Ödənilməyən borclar)", "Amount": 3_000, "Type": "Expense"},
+    {"Line": "Motor expenses (Nəqliyyat xərcləri)", "Amount": 5_000, "Type": "Expense"},
+    {"Line": "Insurance (Sığorta)", "Amount": 1_000, "Type": "Expense"},
+]
+
+# Add a date stamp to each operation (for period filtering).  Default to today.
+for item in pl_data:
+    item['Date'] = datetime.now().date()
+    # Store alias for initial operations equal to the type itself
+    item['Alias'] = item['Type']
+
+# Yardımçı funksiyalar
+def recalc(data):
+    sales = opening = purchases = carriage_in = closing = 0
+    other_income = expenses = 0
+    for item in data:
+        t = item['Type']
+        amount = float(item['Amount'])
+        if t == 'Revenue':
+            sales += amount
+        elif t == 'COGS':
+            line = item['Line'].lower()
+            if 'opening' in line:
+                opening += amount
+            elif 'purchases' in line:
+                purchases += amount
+            elif 'inwards' in line:
+                carriage_in += amount
+            elif 'closing' in line:
+                closing += amount
+        elif t == 'Other Income':
+            other_income += amount
+        elif t == 'Expense':
+            expenses += amount
+    cost_of_sales = opening + purchases + carriage_in - closing
+    gross_profit = sales - cost_of_sales
+    net_income_before_exp = gross_profit + other_income
+    profit_for_year = net_income_before_exp - expenses
+    return {
+        'sales': sales,
+        'cost_of_sales': cost_of_sales,
+        'gross_profit': gross_profit,
+        'other_income': other_income,
+        'net_income_before_exp': net_income_before_exp,
+        'total_expenses': expenses,
+        'profit_for_year': profit_for_year,
+    }
+
+def fmt_amt(value):
+    sign = '(' if value < 0 else ''
+    num = abs(int(round(value)))
+    s = f"{num:,}".replace(',', ' ')
+    return f"{sign}{s}{')' if sign else ''}"
+
+def create_rows(data):
+    summary = recalc(data)
+    rows = []
+    # Revenue
+    rev_items = [item for item in data if item['Type'] == 'Revenue']
+    for item in rev_items:
+        # Use alias (custom type name) for the Category column
+        alias = item.get('Alias', item['Type'])
+        rows.append({
+            'Description': item['Line'],
+            'Amount (₼)': fmt_amt(item['Amount']),
+            'Totals (₼)': '',
+            'Category': alias
+        })
+    if rev_items:
+        rows.append({'Description': 'TOTAL SALES', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(summary['sales']), 'Category': 'Total'})
+    rows.append({'Description': '', 'Amount (₼)': '', 'Totals (₼)': '', 'Category': ''})
+    # Cost of sales
+    rows.append({'Description': 'Less: Cost of Sales', 'Amount (₼)': '', 'Totals (₼)': '', 'Category': ''})
+    cogs_items = [item for item in data if item['Type'] == 'COGS']
+    cogs_sub = 0
+    for item in cogs_items:
+        if 'closing' not in item['Line'].lower():
+            cogs_sub += float(item['Amount'])
+            alias = item.get('Alias', item['Type'])
+            rows.append({'Description': f"  – {item['Line']}", 'Amount (₼)': fmt_amt(item['Amount']), 'Totals (₼)': '', 'Category': alias})
+    rows.append({'Description': '', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(cogs_sub), 'Category': 'Subtotal'})
+    for item in cogs_items:
+        if 'closing' in item['Line'].lower():
+            alias = item.get('Alias', item['Type'])
+            rows.append({'Description': f"  – {item['Line']}", 'Amount (₼)': fmt_amt(-float(item['Amount'])), 'Totals (₼)': '', 'Category': alias})
+    rows.append({'Description': '', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(-summary['cost_of_sales']), 'Category': 'Total COGS'})
+    rows.append({'Description': '─' * 50, 'Amount (₼)': '─' * 15, 'Totals (₼)': '─' * 15, 'Category': ''})
+    # Gross profit
+    rows.append({'Description': 'GROSS PROFIT', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(summary['gross_profit']), 'Category': 'Gross Profit'})
+    g_margin = (summary['gross_profit'] / summary['sales'] * 100) if summary['sales'] else 0
+    c_ratio = (summary['cost_of_sales'] / summary['sales'] * 100) if summary['sales'] else 0
+    rows.append({'Description': '  → Gross Profit Margin', 'Amount (₼)': '', 'Totals (₼)': f"{g_margin:.1f}%", 'Category': 'Ratio'})
+    rows.append({'Description': '  → Cost of Sales Ratio', 'Amount (₼)': '', 'Totals (₼)': f"{c_ratio:.1f}%", 'Category': 'Ratio'})
+    rows.append({'Description': '', 'Amount (₼)': '', 'Totals (₼)': '', 'Category': ''})
+    # Other income
+    other_items = [item for item in data if item['Type'] == 'Other Income']
+    for item in other_items:
+        alias = item.get('Alias', item['Type'])
+        rows.append({'Description': item['Line'], 'Amount (₼)': fmt_amt(item['Amount']), 'Totals (₼)': '', 'Category': alias})
+    if other_items:
+        rows.append({'Description': 'TOTAL OTHER INCOME', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(summary['other_income']), 'Category': 'Total'})
+    rows.append({'Description': '', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(summary['net_income_before_exp']), 'Category': 'Subtotal'})
+    rows.append({'Description': '', 'Amount (₼)': '', 'Totals (₼)': '', 'Category': ''})
+    # Expenses
+    rows.append({'Description': 'Less: Expenses', 'Amount (₼)': '', 'Totals (₼)': '', 'Category': ''})
+    exp_items = [item for item in data if item['Type'] == 'Expense']
+    for item in exp_items:
+        alias = item.get('Alias', item['Type'])
+        rows.append({'Description': f"  – {item['Line']}", 'Amount (₼)': fmt_amt(item['Amount']), 'Totals (₼)': '', 'Category': alias})
+    rows.append({'Description': '', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(-summary['total_expenses']), 'Category': 'Total Expenses'})
+    e_ratio = (summary['total_expenses'] / summary['sales'] * 100) if summary['sales'] else 0
+    rows.append({'Description': '  → Expense Ratio', 'Amount (₼)': '', 'Totals (₼)': f"{e_ratio:.1f}%", 'Category': 'Ratio'})
+    rows.append({'Description': '═' * 50, 'Amount (₼)': '═' * 15, 'Totals (₼)': '═' * 15, 'Category': ''})
+    # Net profit
+    rows.append({'Description': 'NET PROFIT FOR THE YEAR', 'Amount (₼)': '', 'Totals (₼)': fmt_amt(summary['profit_for_year']), 'Category': 'Net Profit'})
+    n_margin = (summary['profit_for_year'] / summary['sales'] * 100) if summary['sales'] else 0
+    rows.append({'Description': '  → Net Profit Margin', 'Amount (₼)': '', 'Totals (₼)': f"{n_margin:.1f}%", 'Category': 'Ratio'})
+    return rows
+
+# Sistem sinfi
+class PLMenuSystem:
+    def __init__(self):
+        """
+        Initialise the profit/loss manager.  All operations are
+        stored in ``self.data``.  A history stack is used to support
+        undo.  The ``report_year`` attribute reflects the accounting
+        period and is only for display – operations are not filtered
+        by date.
+        """
+        # Copy initial data and ensure date field exists
+        # Copy initial data, preserving alias for each operation
+        self.data = [item.copy() for item in pl_data]
+        # Widget containers for the menu and detail area
+        self.menu_output = Output()
+        self.current_output = Output()
+        # History stack for undo functionality
+        self.history: list = []
+        # Report year (displayed in status and statement headings)
+        self.report_year = datetime.now().year
+        # Reporting period start and end dates (for display only)
+        self.period_start = datetime(self.report_year, 1, 1).date()
+        self.period_end = datetime(self.report_year, 12, 31).date()
+
+        # Categories for operation types.  Users can manage this list via
+        # the “Manage types” interface.  It initially contains the
+        # standard types used in the ACCA statement.
+        self.categories = ['Revenue', 'COGS', 'Other Income', 'Expense']
+        # Mapping from category alias to base type used in calculations.
+        # By default, each category maps to itself.  When users add
+        # custom categories, they will be mapped to one of the base
+        # types (Revenue, COGS, Other Income, Expense) via the manage
+        # categories interface.
+        self.category_map = {
+            'Revenue': 'Revenue',
+            'COGS': 'COGS',
+            'Other Income': 'Other Income',
+            'Expense': 'Expense'
+        }
+
+    def status_html(self) -> str:
+        """
+        Build an HTML string summarising the current financial
+        position.  Since all operations are included (there are no
+        date/type filters), the summary reflects the entire dataset.
+        The report year is displayed for context only.
+        """
+        s = recalc(self.data)
+        avg_expense_pct = (s['total_expenses'] / s['sales'] * 100) if s['sales'] else 0
+        html = f"""
+        <pre style="font-family:Consolas, monospace; font-size:14px;">
+📊 STATUS:
+├─ 💵 Total Sales: {fmt_amt(s['sales'])}
+├─ 📦 Cost of Sales: {fmt_amt(s['cost_of_sales'])}
+├─ 💰 Gross Profit: {fmt_amt(s['gross_profit'])}
+├─ 💸 Total Expenses: {fmt_amt(s['total_expenses'])}
+├─ 🏆 Net Profit: {fmt_amt(s['profit_for_year'])}
+├─ 🔗 Gross Margin: {(s['gross_profit'] / s['sales'] * 100 if s['sales'] else 0):.1f}%
+└─ 📉 Expense Ratio: {avg_expense_pct:.1f}%
+Hesabat ili: {self.report_year}
+Hesabat dövrü: {self.period_start.strftime('%d.%m.%Y')} - {self.period_end.strftime('%d.%m.%Y')}
+        </pre>
+        """
+        return html
+    def show_main(self):
+        with self.menu_output:
+            clear_output(wait=True)
+            # Başlıq
+            header = HTML("""
+            <div style="background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);padding:20px;border-radius:15px;color:white;text-align:center;">
+            <h2>📊 Profit & Loss Manager</h2>
+            <p>Menu əsaslı interaktiv sistem</p>
+            </div>
+            """)
+            display(header)
+            display(HTML(self.status_html()))
+            # Düymələr
+            # Create menu buttons: add, edit, delete, undo, view, dashboard, export (Excel/CSV), reset
+            b_add = Button(description="➕ Əməliyyat əlavə et", button_style='success', layout=widgets.Layout(width='200px',height='40px'))
+            b_edit = Button(description="✏️ Əməliyyatı dəyiş", button_style='warning', layout=widgets.Layout(width='200px',height='40px'))
+            b_del = Button(description="🗑️ Əməliyyatı sil", button_style='danger', layout=widgets.Layout(width='200px',height='40px'))
+            b_undo = Button(description='↩️ Geri al', button_style='info', layout=widgets.Layout(width='200px', height='40px'))
+            b_view = Button(description="📋 Hesabatı göstər", button_style='info', layout=widgets.Layout(width='200px',height='40px'))
+            b_dash = Button(description="📈 Dashboard", button_style='warning', layout=widgets.Layout(width='200px',height='40px'))
+            b_backup = Button(description="💾 Backup (Excel)", button_style='primary', layout=widgets.Layout(width='200px',height='40px'))
+            b_csv = Button(description='📄 Export CSV', button_style='primary', layout=widgets.Layout(width='200px', height='40px'))
+            b_reset = Button(description="🔄 Verilənləri sıfırla", button_style='danger', layout=widgets.Layout(width='200px',height='40px'))
+            # Button to manage operation types (categories)
+            b_manage_types = Button(description='⚙️ Tip idarə et', button_style='info', layout=widgets.Layout(width='200px', height='40px'))
+            # Attach event handlers
+            b_add.on_click(lambda b: self.show_add())
+            b_edit.on_click(lambda b: self.show_edit())
+            b_del.on_click(lambda b: self.show_delete())
+            b_undo.on_click(lambda b: self.undo())
+            b_view.on_click(lambda b: self.show_statement())
+            b_dash.on_click(lambda b: self.show_dashboard())
+            b_backup.on_click(lambda b: self.export_excel())
+            b_csv.on_click(lambda b: self.export_csv())
+            b_reset.on_click(lambda b: self.reset_data())
+            b_manage_types.on_click(lambda b: self.show_manage_categories())
+            # Inputs for report year and period start/end dates
+            year_input = widgets.IntText(value=self.report_year, description='Hesabat ili:', layout=widgets.Layout(width='150px'))
+            start_picker = widgets.DatePicker(value=self.period_start, description='Başlanğıc:', layout=widgets.Layout(width='200px'))
+            end_picker = widgets.DatePicker(value=self.period_end, description='Bitmə tarixi:', layout=widgets.Layout(width='200px'))
+            # Handlers for updating internal state on change
+            def on_year_change(change):
+                try:
+                    new_year = int(change['new'])
+                except Exception:
+                    return
+                # Update report year and reset period to the full year
+                self.report_year = new_year
+                self.period_start = datetime(self.report_year, 1, 1).date()
+                self.period_end = datetime(self.report_year, 12, 31).date()
+                self.show_main()
+            def on_start_change(change):
+                # Only update if a valid date is provided
+                if change['new']:
+                    self.period_start = change['new']
+                    self.show_main()
+            def on_end_change(change):
+                if change['new']:
+                    self.period_end = change['new']
+                    self.show_main()
+            year_input.observe(on_year_change, names='value')
+            start_picker.observe(on_start_change, names='value')
+            end_picker.observe(on_end_change, names='value')
+            # Arrange inputs and buttons into rows
+            date_row = HBox([year_input, start_picker, end_picker], layout=widgets.Layout(justify_content='center', padding='5px'))
+            buttons_row1 = HBox([b_add, b_edit, b_del, b_undo], layout=widgets.Layout(justify_content='center', padding='5px'))
+            # Include type management button in the second row before reset
+            buttons_row2 = HBox([b_view, b_dash, b_backup, b_csv, b_manage_types, b_reset], layout=widgets.Layout(justify_content='center', padding='5px'))
+            display(date_row)
+            display(buttons_row1)
+            display(buttons_row2)
+            display(self.current_output)
+    def show_add(self):
+        with self.current_output:
+            clear_output(wait=True)
+            desc = Text(description='Təsvir:', placeholder='Əməliyyatın adı', layout=widgets.Layout(width='400px'))
+            amt = FloatText(description='Məbləğ:', layout=widgets.Layout(width='200px'))
+            # Type dropdown uses the current categories list
+            tdd = Dropdown(description='Tip:', options=self.categories, value=self.categories[0] if self.categories else None, layout=widgets.Layout(width='200px'))
+            add_btn = Button(description='✅ Əlavə et', button_style='success')
+            cancel_btn = Button(description='❌ Ləğv et', button_style='warning')
+            msg_out = Output()
+            def on_add(b):
+                with msg_out:
+                    clear_output(wait=True)
+                    if not desc.value.strip():
+                        print('⚠️ Təsvir boş ola bilməz!');
+                        return
+                    try:
+                        val = float(amt.value)
+                    except Exception:
+                        print('⚠️ Məbləğ düzgün deyil!');
+                        return
+                    # Save current state for undo before adding
+                    self.history.append([item.copy() for item in self.data])
+                    # Determine the base type using the category mapping
+                    alias = tdd.value
+                    base_type = self.category_map.get(alias, alias)
+                    # Append the new operation
+                    self.data.append({'Line': desc.value.strip(), 'Amount': val, 'Type': base_type, 'Date': datetime.now().date(), 'Alias': alias})
+                    print(f"✅ '{desc.value}' əməliyyatı əlavə edildi!")
+                    self.show_main()
+            def on_cancel(b):
+                with msg_out:
+                    clear_output(wait=True)
+                    print('🚫 Əlavə etmə ləğv edildi.')
+                    self.show_main()
+            add_btn.on_click(on_add)
+            cancel_btn.on_click(on_cancel)
+            display(VBox([desc,amt,tdd,HBox([add_btn,cancel_btn]),msg_out]))
+    def show_statement(self):
+        with self.current_output:
+            clear_output(wait=True)
+            # Display the profit and loss statement.  Since all data is included
+            # regardless of date or type, we simply build the rows from
+            # ``self.data``.  The report year and period are shown for context.
+            period_info = f"{self.period_start.strftime('%d.%m.%Y')} - {self.period_end.strftime('%d.%m.%Y')}"
+            print(f"📋 PROFIT & LOSS STATEMENT ({self.report_year})  [{period_info}]\n" + '='*30)
+            rows = create_rows(self.data)
+            df = pd.DataFrame(rows)
+            display(df[['Description','Amount (₼)','Totals (₼)','Category']])
+    def show_dashboard(self):
+        with self.current_output:
+            clear_output(wait=True)
+            # Use all operations for the dashboard (no date/type filters)
+            filtered = self.data
+            s = recalc(filtered)
+            # Prepare aggregated values
+            rev_vals = [s['sales'], s['other_income']]
+            rev_labels = ['Sales', 'Other Income']
+            prof_vals = [s['sales'], s['gross_profit'], s['profit_for_year']]
+            prof_labels = ['Sales', 'Gross Profit', 'Net Profit']
+            exp_items = [(item['Line'], float(item['Amount'])) for item in filtered if item['Type'] == 'Expense']
+            ratios = []
+            if s['sales']:
+                ratios = [
+                    s['gross_profit'] / s['sales'] * 100,
+                    s['profit_for_year'] / s['sales'] * 100,
+                    s['total_expenses'] / s['sales'] * 100,
+                    s['cost_of_sales'] / s['sales'] * 100,
+                ]
+            else:
+                ratios = [0, 0, 0, 0]
+            ratio_labels = ['Gross Margin', 'Net Margin', 'Expense Ratio', 'COGS Ratio']
+            # Dropdown to select chart style
+            style_dd = Dropdown(
+                options=[('Default', 'default'), ('Bar', 'bar'), ('Line', 'line'), ('Pie', 'pie'), ('Table', 'table'), ('Scatter', 'scatter'), ('Bubble', 'bubble')],
+                value='default',
+                description='Chart style:',
+                layout=widgets.Layout(width='220px')
+            )
+            fig_out = Output()
+            def draw_charts(style):
+                """Draw the dashboard charts according to the selected style."""
+                with fig_out:
+                    clear_output(wait=True)
+                    # 'table' displays a DataFrame summary instead of charts
+                    if style == 'table':
+                        summary_df = pd.DataFrame({
+                            'Metric': ['Sales', 'Cost of Sales', 'Gross Profit', 'Other Income', 'Total Expenses', 'Net Profit'],
+                            'Amount (₼)': [fmt_amt(s['sales']), fmt_amt(s['cost_of_sales']), fmt_amt(s['gross_profit']), fmt_amt(s['other_income']), fmt_amt(s['total_expenses']), fmt_amt(s['profit_for_year'])]
+                        })
+                        display(summary_df)
+                        return
+                    # Otherwise draw charts
+                    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+                    # Revenue chart
+                    if style == 'default' or style == 'pie':
+                        # pie for revenue
+                        if sum(rev_vals) > 0:
+                            axes[0, 0].pie(rev_vals, labels=rev_labels, autopct='%1.1f%%', startangle=90, colors=['#1cb55c', '#8e44ad'])
+                        else:
+                            axes[0, 0].text(0.5, 0.5, 'No Revenue', ha='center', va='center')
+                        axes[0, 0].set_title('Revenue Composition')
+                    elif style == 'bar':
+                        axes[0, 0].bar(rev_labels, rev_vals, color=['#1cb55c', '#8e44ad'])
+                        for i, v in enumerate(rev_vals):
+                            axes[0, 0].text(i, v + max(rev_vals) * 0.02, f"{int(v):,}".replace(',', ' '), ha='center', fontsize=8)
+                        axes[0, 0].set_title('Revenue Composition')
+                    elif style == 'line':
+                        axes[0, 0].plot(rev_labels, rev_vals, marker='o', color='#1cb55c')
+                        for x, y in zip(rev_labels, rev_vals):
+                            axes[0, 0].annotate(f"{int(y):,}".replace(',', ' '), xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=8)
+                        axes[0, 0].set_title('Revenue Composition')
+                    elif style == 'scatter':
+                        axes[0, 0].scatter(rev_labels, rev_vals, color='#1cb55c')
+                        for x, y in zip(rev_labels, rev_vals):
+                            axes[0, 0].annotate(f"{int(y):,}".replace(',', ' '), xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=8)
+                        axes[0, 0].set_title('Revenue Composition')
+                    elif style == 'bubble':
+                        sizes = [(v / max(rev_vals)) * 500 + 50 if max(rev_vals) > 0 else 100 for v in rev_vals]
+                        axes[0, 0].scatter(rev_labels, rev_vals, s=sizes, color='#1cb55c', alpha=0.6)
+                        for x, y in zip(rev_labels, rev_vals):
+                            axes[0, 0].annotate(f"{int(y):,}".replace(',', ' '), xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=8)
+                        axes[0, 0].set_title('Revenue Composition')
+                    else:
+                        # fallback to bar
+                        axes[0, 0].bar(rev_labels, rev_vals, color=['#1cb55c', '#8e44ad'])
+                        axes[0, 0].set_title('Revenue Composition')
+                    # Profitability chart
+                    if style == 'line':
+                        axes[0, 1].plot(prof_labels, prof_vals, marker='o', color='#27ae60')
+                        for x, y in zip(prof_labels, prof_vals):
+                            axes[0, 1].annotate(f"{int(y):,}".replace(',', ' '), xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=8)
+                        axes[0, 1].set_title('Profitability Overview')
+                    elif style == 'scatter':
+                        axes[0, 1].scatter(prof_labels, prof_vals, color='#27ae60')
+                        for x, y in zip(prof_labels, prof_vals):
+                            axes[0, 1].annotate(f"{int(y):,}".replace(',', ' '), xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=8)
+                        axes[0, 1].set_title('Profitability Overview')
+                    elif style == 'bubble':
+                        # Use bar for profitability in bubble style for clarity
+                        axes[0, 1].bar(prof_labels, prof_vals, color=['#1cb55c', '#27ae60', '#16a085'])
+                        for i, v in enumerate(prof_vals):
+                            axes[0, 1].text(i, v + max(prof_vals) * 0.02, f"{int(v):,}".replace(',', ' '), ha='center', fontsize=8)
+                        axes[0, 1].set_title('Profitability Overview')
+                    else:
+                        axes[0, 1].bar(prof_labels, prof_vals, color=['#1cb55c', '#27ae60', '#16a085'])
+                        for i, v in enumerate(prof_vals):
+                            axes[0, 1].text(i, v + max(prof_vals) * 0.02, f"{int(v):,}".replace(',', ' '), ha='center', fontsize=8)
+                        axes[0, 1].set_title('Profitability Overview')
+                    # Expenses breakdown
+                    if exp_items:
+                        names, vals = zip(*exp_items)
+                        if style == 'bubble':
+                            sizes_exp = [(v / max(vals)) * 500 + 50 if max(vals) > 0 else 100 for v in vals]
+                            axes[1, 0].scatter(names, vals, s=sizes_exp, color='#e74c3c', alpha=0.6)
+                            axes[1, 0].set_title('Expenses Breakdown')
+                            axes[1, 0].tick_params(axis='x', rotation=45, labelsize=7)
+                            for x, y in zip(names, vals):
+                                axes[1, 0].annotate(f"{int(y):,}".replace(',', ' '), xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=7)
+                        elif style == 'scatter':
+                            axes[1, 0].scatter(names, vals, color='#e74c3c')
+                            axes[1, 0].set_title('Expenses Breakdown')
+                            axes[1, 0].tick_params(axis='x', rotation=45, labelsize=7)
+                            for x, y in zip(names, vals):
+                                axes[1, 0].annotate(f"{int(y):,}".replace(',', ' '), xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=7)
+                        else:
+                            axes[1, 0].bar(names, vals, color='#e74c3c')
+                            axes[1, 0].set_title('Expenses Breakdown')
+                            axes[1, 0].tick_params(axis='x', rotation=45, labelsize=7)
+                            for i, v in enumerate(vals):
+                                axes[1, 0].text(i, v + max(vals) * 0.02, f"{int(v):,}".replace(',', ' '), ha='center', fontsize=7)
+                    else:
+                        axes[1, 0].text(0.5, 0.5, 'No Expenses', ha='center', va='center')
+                        axes[1, 0].set_title('Expenses Breakdown')
+                        axes[1, 0].set_xticks([])
+                        axes[1, 0].set_yticks([])
+                    # Financial ratios always as line
+                    axes[1, 1].plot(ratio_labels, ratios, marker='o', color='#2980b9')
+                    axes[1, 1].set_title('Financial Ratios (%)')
+                    max_ratio = max(ratios + [10])
+                    axes[1, 1].set_ylim(0, max_ratio * 1.3)
+                    for x, y in zip(ratio_labels, ratios):
+                        axes[1, 1].annotate(f"{y:.1f}%", xy=(x, y), xytext=(0, 5), textcoords='offset points', ha='center', fontsize=8)
+                    # Style improvements
+                    for ax in axes.flatten():
+                        ax.set_facecolor('#f5f7fa')
+                        ax.spines['top'].set_visible(False)
+                        ax.spines['right'].set_visible(False)
+                        ax.grid(axis='y', linestyle=':', linewidth=0.5, alpha=0.5)
+                    plt.tight_layout()
+                    plt.show()
+            # Draw initial charts
+            draw_charts(style_dd.value)
+            # Observe dropdown changes
+            def on_style_change(change):
+                draw_charts(change['new'])
+            style_dd.observe(on_style_change, names='value')
+            # Display controls and the figure
+            display(style_dd)
+            display(fig_out)
+            # Additional statistics (unfiltered)
+            num_ops = len(filtered)
+            num_revenue = len([it for it in filtered if it['Type'] == 'Revenue'])
+            num_cogs = len([it for it in filtered if it['Type'] == 'COGS'])
+            num_other = len([it for it in filtered if it['Type'] == 'Other Income'])
+            num_exp = len([it for it in filtered if it['Type'] == 'Expense'])
+            highest_expense = None
+            if num_exp:
+                highest_expense = max([it for it in filtered if it['Type'] == 'Expense'], key=lambda x: x['Amount'])
+            print('\n🧮 Əlavə Statistika:')
+            print(f"• Əməliyyatların sayı: {num_ops}")
+            print(f"• Gəlir (Revenue) əməliyyatı: {num_revenue}")
+            print(f"• Satışın maya dəyəri (COGS) əməliyyatı: {num_cogs}")
+            print(f"• Digər gəlir (Other Income) əməliyyatı: {num_other}")
+            print(f"• Xərc (Expense) əməliyyatı: {num_exp}")
+            if highest_expense:
+                print(f"• Ən böyük xərc: {highest_expense['Line']} - {fmt_amt(highest_expense['Amount'])} ₼")
+            print(f"• Hesabat ili: {self.report_year}")
+            print(f"• Hesabat dövrü: {self.period_start.strftime('%d.%m.%Y')} - {self.period_end.strftime('%d.%m.%Y')}")
+            print()
+    def export_excel(self):
+        """
+        Export the current statement to an Excel file and immediately
+        display it within Jupyter.  Dash and line separator rows are
+        excluded from the export.  A clickable link is provided to
+        download the file, and a button allows opening the file in
+        the system's default Excel application.  The function also
+        prints a simple code snippet for reading the file back into
+        pandas.
+        """
+        with self.current_output:
+            clear_output(wait=True)
+            # Build the statement and remove decorative separator rows
+            rows = create_rows(self.data)
+            df = pd.DataFrame(rows)
+            # Filter out rows where Description or Totals contains dash lines
+            # This prevents separators like '────' and '════' from appearing in the exported file
+            mask = ~df['Description'].astype(str).str.startswith(('─', '═'))
+            df_filtered = df[mask].reset_index(drop=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M')
+            fname = f'profit_loss_export_{ts}.xlsx'
+            # Save the filtered DataFrame to Excel
+            df_filtered.to_excel(fname, index=False)
+            print(f'💾 Excel faylı yaradıldı: {fname}')
+            # Provide a downloadable link
+            try:
+                from IPython.display import FileLink
+                display(FileLink(fname))
+            except Exception:
+                pass
+            # Output area for preview when requested
+            preview_out = Output()
+            # Button to display the contents of the Excel file within Jupyter on demand
+            def show_in_jupyter(b):
+                # Toggle preview: if already shown, clear; otherwise show
+                if len(preview_out.outputs) > 0:
+                    preview_out.clear_output()
+                    return
+                with preview_out:
+                    clear_output(wait=True)
+                    try:
+                        df_preview = pd.read_excel(fname)
+                        from IPython.display import display as ipy_display
+                        # Replace NaN with a more readable string
+                        df_display = df_preview.fillna('NaN')
+                        print('📁 Fayl ön izləmə (tam DataFrame):')
+                        ipy_display(df_display)
+                        print('\n💡 Faylı oxumaq üçün:')
+                        print(f"df = pd.read_excel('{fname}')")
+                        print("print(df.head())")
+                        print("print(df.columns)")
+                        print("print(df.shape)")
+                    except Exception as e:
+                        print(f'⚠️ Fayl oxuna bilmədi: {e}')
+            btn_show = Button(description='📑 Jupyter-də göstər', button_style='info', layout=widgets.Layout(width='200px'))
+            btn_show.on_click(show_in_jupyter)
+            # Button to open the file using the system default application (e.g., Microsoft Excel)
+            def open_in_excel(b):
+                try:
+                    import os, sys, subprocess
+                    if sys.platform.startswith('darwin'):
+                        subprocess.call(['open', fname])
+                    elif os.name == 'nt':
+                        os.startfile(fname)
+                    elif os.name == 'posix':
+                        subprocess.call(['xdg-open', fname])
+                except Exception as e:
+                    print(f'⚠️ Fayl açmaq mümkün olmadı: {e}')
+            btn_open = Button(description='📂 Excel-də aç', button_style='warning', layout=widgets.Layout(width='180px'))
+            btn_open.on_click(open_in_excel)
+            # Display buttons and preview area
+            display(HBox([btn_show, btn_open], layout=widgets.Layout(padding='5px')))
+            display(preview_out)
+    def reset_data(self):
+        with self.current_output:
+            clear_output(wait=True)
+            # Save current state for undo
+            self.history.append([item.copy() for item in self.data])
+            self.data=[item.copy() for item in pl_data]
+            print('🔄 Məlumatlar ilkin vəziyyətə qaytarıldı!')
+            self.show_main()
+
+    # Undo the last action by restoring the previous data state
+    def undo(self):
+        """Revert to the previous state of the data if available."""
+        with self.current_output:
+            clear_output(wait=True)
+            if not self.history:
+                print('⚠️ Geri almaq üçün tarixi yoxdur!')
+                self.show_main()
+                return
+            # Restore the last saved state
+            self.data = [item.copy() for item in self.history.pop()]
+            print('↩️ Son əməliyyat geri alındı!')
+            self.show_main()
+
+    # Export to CSV (in addition to Excel)
+    def export_csv(self):
+        """Export the current filtered statement to a CSV file."""
+        with self.current_output:
+            clear_output(wait=True)
+            # Build the statement from all operations and remove decorative separators
+            rows = create_rows(self.data)
+            df = pd.DataFrame(rows)
+            mask = ~df['Description'].astype(str).str.startswith(('─', '═'))
+            df_filtered = df[mask].reset_index(drop=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M')
+            fname = f'profit_loss_export_{ts}.csv'
+            df_filtered.to_csv(fname, index=False)
+            print(f'📄 CSV faylı yaradıldı: {fname}')
+            # Provide a downloadable link
+            try:
+                from IPython.display import FileLink
+                display(FileLink(fname))
+            except Exception:
+                pass
+            # Output area for preview when requested
+            preview_out = Output()
+            # Button to display the contents of the CSV file within Jupyter on demand
+            def show_in_jupyter(b):
+                # Toggle preview: if already shown, clear; otherwise show
+                if len(preview_out.outputs) > 0:
+                    preview_out.clear_output()
+                    return
+                with preview_out:
+                    clear_output(wait=True)
+                    try:
+                        df_preview = pd.read_csv(fname)
+                        from IPython.display import display as ipy_display
+                        # Replace NaN with a more readable string
+                        df_display = df_preview.fillna('NaN')
+                        print('📁 Fayl ön izləmə (tam DataFrame):')
+                        ipy_display(df_display)
+                        print('\n💡 Faylı oxumaq üçün:')
+                        print(f"df = pd.read_csv('{fname}')")
+                        print("print(df.head())")
+                        print("print(df.columns)")
+                        print("print(df.shape)")
+                    except Exception as e:
+                        print(f'⚠️ Fayl oxuna bilmədi: {e}')
+            btn_show = Button(description='📑 Jupyter-də göstər', button_style='info', layout=widgets.Layout(width='200px'))
+            btn_show.on_click(show_in_jupyter)
+            # Allow opening externally using the system default application
+            def open_in_excel(b):
+                try:
+                    import os, sys, subprocess
+                    if sys.platform.startswith('darwin'):
+                        subprocess.call(['open', fname])
+                    elif os.name == 'nt':
+                        os.startfile(fname)
+                    elif os.name == 'posix':
+                        subprocess.call(['xdg-open', fname])
+                except Exception as e:
+                    print(f'⚠️ Fayl açmaq mümkün olmadı: {e}')
+            btn_open = Button(description='📂 Faylı aç', button_style='warning', layout=widgets.Layout(width='180px'))
+            btn_open.on_click(open_in_excel)
+            # Display buttons and preview area
+            display(HBox([btn_show, btn_open], layout=widgets.Layout(padding='5px')))
+            display(preview_out)
+
+    # We no longer filter by date, type or description.  This method
+    # remains for backward compatibility but simply returns all data.
+    def _get_filtered_data(self):
+        return list(self.data)
+
+    # New: editing interface
+    def show_edit(self):
+        with self.current_output:
+            clear_output(wait=True)
+            if not self.data:
+                print('⚠️ Məlumat yoxdur!')
+                return
+            # Dropdown to select operation by index
+            options = [f"{i}. {item['Line']} ({fmt_amt(item['Amount'])})" for i,item in enumerate(self.data)]
+            select = Dropdown(options=options, description='Seç:', layout=widgets.Layout(width='400px'))
+            desc_in = Text(description='Yeni təsvir:', layout=widgets.Layout(width='400px'))
+            amt_in = FloatText(description='Yeni məbləğ:', layout=widgets.Layout(width='200px'))
+            # Type dropdown uses the current categories list
+            type_in = Dropdown(description='Yeni tip:', options=self.categories, layout=widgets.Layout(width='200px'))
+            ok_btn = Button(description='💾 Yadda saxla', button_style='success')
+            cancel_btn = Button(description='❌ Ləğv et', button_style='warning')
+            msg_out = Output()
+            def on_ok(b):
+                idx = select.options.index(select.value)
+                with msg_out:
+                    clear_output(wait=True)
+                    try:
+                        new_amt = float(amt_in.value) if amt_in.value not in [None,''] else self.data[idx]['Amount']
+                    except Exception:
+                        print('⚠️ Məbləğ düzgün deyil!'); return
+                    new_desc = desc_in.value.strip() or self.data[idx]['Line']
+                    # Determine the base type using the category mapping
+                    selected_alias = type_in.value or self.data[idx]['Type']
+                    base_type = self.category_map.get(selected_alias, selected_alias)
+                    # Save current state for undo
+                    self.history.append([item.copy() for item in self.data])
+                    # Apply updates, including alias
+                    self.data[idx]['Line'] = new_desc
+                    self.data[idx]['Amount'] = new_amt
+                    self.data[idx]['Type'] = base_type
+                    self.data[idx]['Alias'] = selected_alias
+                    print('✅ Əməliyyat yeniləndi!')
+                    self.show_main()
+            def on_cancel(b):
+                with msg_out:
+                    clear_output(wait=True)
+                    print('🚫 Dəyişiklik ləğv edildi.')
+                    self.show_main()
+            ok_btn.on_click(on_ok)
+            cancel_btn.on_click(on_cancel)
+            display(VBox([select,desc_in,amt_in,type_in,HBox([ok_btn,cancel_btn]),msg_out]))
+
+    # New: deletion interface
+    def show_delete(self):
+        with self.current_output:
+            clear_output(wait=True)
+            if not self.data:
+                print('⚠️ Məlumat yoxdur!')
+                return
+            options = [f"{i}. {item['Line']} ({fmt_amt(item['Amount'])})" for i,item in enumerate(self.data)]
+            select = Dropdown(options=options, description='Sil:', layout=widgets.Layout(width='400px'))
+            del_btn = Button(description='🗑️ Sil', button_style='danger')
+            cancel_btn = Button(description='❌ Ləğv et', button_style='warning')
+            msg_out = Output()
+            def on_delete(b):
+                idx = select.options.index(select.value)
+                with msg_out:
+                    clear_output(wait=True)
+                    # Save current state for undo
+                    self.history.append([itm.copy() for itm in self.data])
+                    item = self.data.pop(idx)
+                    print(f"✅ '{item['Line']}' əməliyyatı silindi!")
+                    self.show_main()
+            def on_cancel(b):
+                with msg_out:
+                    clear_output(wait=True)
+                    print('🚫 Silmə ləğv edildi.')
+                    self.show_main()
+            del_btn.on_click(on_delete)
+            cancel_btn.on_click(on_cancel)
+            display(VBox([select,HBox([del_btn,cancel_btn]),msg_out]))
+
+    # New: manage categories (types) interface
+    def show_manage_categories(self):
+        """
+        Provide an interface to view, add, rename, or delete operation
+        categories (types).  Changes here affect the dropdown lists
+        used when adding or editing operations.  Existing operations
+        retain their original types; only the list of selectable types
+        is modified.
+        """
+        with self.current_output:
+            clear_output(wait=True)
+            print('⚙️ Tip İdarəetməsi')
+            print('=' * 20)
+            if not self.categories:
+                print('⚠️ Hazırda heç bir tip yoxdur.')
+            # Widgets for category management
+            # Dropdown listing current categories
+            cat_options = [(cat, cat) for cat in self.categories]
+            cat_dropdown = Dropdown(options=cat_options, description='Mövcud tip:', layout=widgets.Layout(width='300px'))
+            # Text input and group selector for new name (for rename or add)
+            new_name_in = Text(description='Yeni ad:', layout=widgets.Layout(width='300px'))
+            group_options = ['Revenue', 'COGS', 'Other Income', 'Expense']
+            group_select = Dropdown(options=group_options, description='Qrup:', layout=widgets.Layout(width='200px'))
+            # Buttons for actions
+            btn_rename = Button(description='✏️ Yenidən adlandır', button_style='info')
+            btn_delete = Button(description='🗑️ Sil', button_style='danger')
+            btn_add = Button(description='➕ Yeni tip əlavə et', button_style='success')
+            status_out = Output()
+            # Rename handler
+            def on_rename(b):
+                with status_out:
+                    clear_output(wait=True)
+                    old = cat_dropdown.value
+                    new = new_name_in.value.strip()
+                    grp = group_select.value
+                    if not new:
+                        print('⚠️ Yeni ad boş ola bilməz!'); return
+                    if new in self.categories and new != old:
+                        print('⚠️ Bu ad artıq mövcuddur!'); return
+                    # Replace in the categories list and mapping
+                    idx = self.categories.index(old)
+                    self.categories[idx] = new
+                    # Update mapping: remove old key and add new mapping to selected group
+                    if old in self.category_map:
+                        old_group = self.category_map.pop(old)
+                    else:
+                        old_group = grp
+                    self.category_map[new] = grp
+                    # Update alias on existing operations
+                    for op in self.data:
+                        if op.get('Alias') == old:
+                            op['Alias'] = new
+                    print(f"✅ '{old}' tipi '{new}' olaraq dəyişdirildi! (Qrup: {grp})")
+                    self.show_main()
+            # Delete handler
+            def on_delete_cat(b):
+                with status_out:
+                    clear_output(wait=True)
+                    old = cat_dropdown.value
+                    # Prevent deleting if only one category remains
+                    if len(self.categories) <= 1:
+                        print('⚠️ Sonuncu tip silinə bilməz!'); return
+                    self.categories.remove(old)
+                    # Remove mapping if present
+                    if old in self.category_map:
+                        self.category_map.pop(old)
+                    print(f"✅ '{old}' tipi siyahıdan silindi!")
+                    self.show_main()
+            # Add handler
+            def on_add_cat(b):
+                with status_out:
+                    clear_output(wait=True)
+                    new = new_name_in.value.strip()
+                    grp = group_select.value
+                    if not new:
+                        print('⚠️ Tip adı boş ola bilməz!'); return
+                    if new in self.categories:
+                        print('⚠️ Bu tip artıq mövcuddur!'); return
+                    self.categories.append(new)
+                    # Map the new alias to the selected base group
+                    self.category_map[new] = grp
+                    print(f"✅ '{new}' tipi əlavə edildi! (Qrup: {grp})")
+                    self.show_main()
+            # Button event bindings
+            btn_rename.on_click(on_rename)
+            btn_delete.on_click(on_delete_cat)
+            btn_add.on_click(on_add_cat)
+            # Display the interface
+            display(VBox([
+                cat_dropdown,
+                new_name_in,
+                group_select,
+                HBox([btn_rename, btn_delete, btn_add]),
+                status_out
+            ]))
+
+def start_pl_system():
+    system = PLMenuSystem()
+    system.show_main()
+    display(system.menu_output)
+
+start_pl_system()
